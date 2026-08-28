@@ -1,4 +1,4 @@
-# ADR 0001: Stable `@` boot on MacBookPro16,1 via Intel gmux
+# ADR 0001: Internal LCD on Intel for a clean `@` boot
 
 - Date: 2026-08-26
 - Status: Accepted
@@ -7,64 +7,71 @@
 
 ## Context
 
-Stock Omarchy left the internal LCD muxed to the AMD GPU. After `graphical.target`,
-Hyprland died: `SMU: No response` → sdma0 timeout → GPU reset. Journals at the
-stock 5 minute flush looked like a hang before SDDM; they were the same death
-with the tail cut off.
+Omarchy's default T2 install leaves apple-gmux on the discrete GPU. The
+built-in panel then comes up as AMD `0000:03:00.0`. After
+`graphical.target`, Hyprland dies: `SMU: No response` → sdma0 timeout →
+GPU reset. That is the boot failure this record covers.
 
-Plymouth in the initramfs also SIGSEGV'd on this box and blocked SDDM.
-
-apple-gmux picks **one** GPU for the built-in panel. Parameter name is
-`force_igd`. `force_idg` is a modinfo typo and is ignored. `i915.enable_guc=3`
-is not valid on Coffee Lake.
+apple-gmux selects **one** GPU for the internal LCD. The module parameter
+is `force_igd`. `force_idg` is a modinfo typo and does nothing.
+`i915.enable_guc=3` is not valid on Coffee Lake.
 
 ## Decision
 
-Boot the live `@` subvolume to Hyprland with the **internal panel on Intel**.
+Mux the **internal panel to Intel** at boot so i915 owns scanout.
 
-1. UKI cmdline: `apple_gmux.force_igd=1`
-   (`/etc/limine-entry-tool.d/z-t2-amdgpu.conf`).
-2. Keep Plymouth out of mkinitcpio HOOKS and keep `plymouth.enable=0`
-   (`omarchy_hooks.conf`, `no-plymouth.conf`).
-3. Rebuild the UKI only on `@` (`limine-mkinitcpio`). Never from a Snapper
-   overlay — that mixed T2-2 UKI with T2-3 modules and dropped to vfat emergency.
+Add one kernel cmdline token, baked into the UKI:
 
-Do not blacklist amdgpu. Do not add `enable_guc=3` or `force_idg`. Do not
-ship journald `SyncIntervalSec=0` or `1s` — that was a camera, not the fix.
+```
+apple_gmux.force_igd=1
+```
 
-## Install value → committed value
+in `/etc/limine-entry-tool.d/z-t2-amdgpu.conf`:
 
-| Knob | Install / package default | Committed |
+```
+KERNEL_CMDLINE[default]+=" apple_gmux.force_igd=1"
+```
+
+Do not blacklist amdgpu. Do not add `enable_guc=3` or `force_idg`. Rebuild
+the UKI only on `@` (`limine-mkinitcpio`), never from a Snapper overlay.
+
+## Delta from install default
+
+Stock startup (this model): gmux → AMD; i915 is present but does not drive
+the LCD. Hyprland binds the 5300M and dies.
+
+Committed startup: gmux → Intel; i915 drives `eDP-1` at 3072×1920.
+
+| Knob | Install default | This decision |
 |---|---|---|
-| Internal LCD mux | AMD `0000:03:00.0` | Intel `0000:00:02.0` via `apple_gmux.force_igd=1` |
-| `/etc/limine-entry-tool.d/z-t2-amdgpu.conf` | empty | `KERNEL_CMDLINE[default]+=" apple_gmux.force_igd=1"` |
-| mkinitcpio `plymouth` hook | present | removed |
-| `plymouth.enable` | unset | `0` |
-| Journal `SyncIntervalSec` | `5m` | `5m` (1s diagnostic removed) |
+| Internal LCD owner | AMD `0000:03:00.0` | Intel `0000:00:02.0` |
+| `/etc/limine-entry-tool.d/z-t2-amdgpu.conf` | empty (no gmux token) | `KERNEL_CMDLINE[default]+=" apple_gmux.force_igd=1"` |
+| UKI cmdline vs install | (no `force_igd`) | adds `apple_gmux.force_igd=1` |
 
-## Evidence at accept
+Plymouth hook, `quiet splash`, and `plymouth.enable` unset are **install
+defaults again**. They are not part of this delta. Journald is stock `5m`.
 
-3/3 unedited Limine entry-1 `@` desktops with `force_igd` and stock journald,
-no SMU / GPU reset / sdma timeout. Same kernel, mesa, and firmware as 5/5
-SMU deaths with the panel on AMD.
+## Evidence
 
-## How this stays permanent
+3/3 unedited Limine entry-1 `@` boots with `force_igd` and stock journald:
+graphical session, eDP-1 → `0000:00:02.0`, no SMU / GPU reset / sdma
+timeout. Same kernel, mesa, and firmware as 5/5 SMU deaths with the panel
+on AMD.
 
-`z-t2-amdgpu.conf` and `no-plymouth.conf` plus HOOKS without plymouth **are**
-the state. Reboot does not revert them. A later `limine-mkinitcpio` on `@`
-must leave those files in place.
+## Permanence
 
-Do not run `limine-mkinitcpio` from a snapshot overlay.
+`z-t2-amdgpu.conf` is the committed file. Reboot keeps it. A later
+`limine-mkinitcpio` on `@` must leave that file in place or the mux
+returns to AMD and the hang returns.
 
 ## Consequences
 
-- Scanout is UHD 630 at 3072×1920, not the 5300M.
-- Limine default entry is unchanged (still the snapshot). That is a later
-  decision, not this one.
+Desktop scanout is UHD 630, not the 5300M. Limine `default_entry` is
+unchanged.
 
 ## Rejected
 
 - Omarchy PR 5129 as written.
 - `i915.enable_guc=3`.
 - `apple_gmux.force_idg`.
-- Treating `SyncIntervalSec=1s` as part of the shipped config.
+- Shipping a journald `SyncIntervalSec` other than stock.
