@@ -13,8 +13,7 @@ built-in panel then comes up as AMD `0000:03:00.0`. After
 GPU reset. That is the boot failure this record covers.
 
 apple-gmux selects **one** GPU for the internal LCD. The module parameter
-is `force_igd`. `force_idg` is a modinfo typo and does nothing.
-`i915.enable_guc=3` is not valid on Coffee Lake.
+is `force_igd`. `i915.enable_guc=3` is not valid on Coffee Lake.
 
 ## Decision
 
@@ -32,7 +31,7 @@ in `/etc/limine-entry-tool.d/z-t2-amdgpu.conf`:
 KERNEL_CMDLINE[default]+=" apple_gmux.force_igd=1"
 ```
 
-Do not blacklist amdgpu. Do not add `enable_guc=3` or `force_idg`. Rebuild
+Do not blacklist amdgpu. Do not add `enable_guc=3`. Rebuild
 the UKI only on `@` (`limine-mkinitcpio`), never from a Snapper overlay.
 
 ## Delta from install default
@@ -73,5 +72,4 @@ unchanged.
 
 - Omarchy PR 5129 as written.
 - `i915.enable_guc=3`.
-- `apple_gmux.force_idg`.
 - Shipping a journald `SyncIntervalSec` other than stock.
